@@ -9,104 +9,117 @@ import SwiftUI
 import AVFoundation
 import Combine
 
-
-class Model: ObservableObject{
-    @Published var stateItem: [StateItem]
+class Model: ObservableObject {
+    @Published var stateItem: [StateItem] = []
     private var cancellables = Set<AnyCancellable>()
-    init(stItem: [StateItem]){
-        self.stateItem = stItem
-    }
-    func fetchData(){
-        guard let url = URL(string: "https://example.com") else {return}
+    
+    func fetchData() {
+        guard let url = URL(string: "https://example.com") else { return }
         URLSession.shared.dataTaskPublisher(for: url)
-            .map{$0.data}
+            .map { $0.data }
             .decode(type: [StateItem].self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: {
-                [weak self] completion -> Void in
-                completion.receiveValue {
-                    [weak self] data in
-                    self?.stateItem = data
+            .sink(receiveCompletion: { completion in
+                if case let .failure(error) = completion {
+                    print("Error fetching data: \(error)")
                 }
-            }
+            }, receiveValue: { [weak self] data in
+                self?.stateItem = data
+            })
             .store(in: &cancellables)
-        
     }
 }
-struct StateModel{
-    var songName: String
-    var coverImage: Image
-}
-struct StateItem: Codable, Identifiable{
-    let id: Int
-    let uuid: ObjectIdentifier
+
+struct StateItem: Codable, Identifiable {
+    let id: UUID
     let songSelection: String
     let description: String
-    let coverArt: Image
-    let music: AVPlayerItem
-    enum jsonIdentifiers: String, CodingKey{
+    let coverArtURL: String
+    let musicURL: String
+    
+    enum CodingKeys: String, CodingKey {
         case id
-        case track
-        case desc
-        case covertArt
-        case playerItem
-    }
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: jsonIdentifiers.self)
-        self.id = try container.decode(Int.self, forKey: jsonIdentifiers.id)
-        self.songSelection = try container.decode(String.self, forKey: jsonIdentifiers.track)
-        self.description = try container.decode(String.self, forKey: jsonIdentifiers.desc)
-        self.coverArt = try container.decode(Image.self, forKey: jsonIdentifiers.covertArt)
-        self.music = try container.decode(AVPlayerItem.self, forKey: jsonIdentifiers.playerItem)
+        case songSelection = "track"
+        case description = "desc"
+        case coverArtURL = "coverArt"
+        case musicURL = "playerItem"
     }
 }
-struct AudioPlayer{
-    var mediaPlayer: AVPlayer
-    var mediaItem: AVPlayerItem
-    func playMedia(){
-        mediaPlayer.play(mediaItem)
+
+struct AudioPlayer {
+    var mediaPlayer = AVPlayer()
+    
+    func playMedia(with item: AVPlayerItem) {
+        mediaPlayer.replaceCurrentItem(with: item)
+        mediaPlayer.play()
     }
 }
+
 struct ContentView: View {
     @State var isPlaying: Bool = false
+    @State var label: String = "Play"
     @EnvironmentObject var model: Model
     @State var sModel: StateModel = StateModel(songName: "null", coverImage: Image(systemName: "globe"))
+    
     var body: some View {
-        ZStack{
-            VStack{
-                List(model.stateItem){ art in
-                    HStack(spacing: 5){
-                        art.coverArt
-                        Text(art.songSelection)
-                        VStack{
-                            Text(art.description)
-                        }.padding(.bottom)
+        ZStack {
+            VStack {
+                List(model.stateItem) { art in
+                    HStack(spacing: 5) {
+                        AsyncImage(url: URL(string: art.coverArtURL)) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            Image(systemName: "photo").resizable().scaledToFit()
+                        }
+                        .frame(width: 50, height: 50)
+                        
+                        VStack(alignment: .leading) {
+                            Text(art.songSelection).font(.headline)
+                            Text(art.description).font(.subheadline)
+                        }
+                        
                         Spacer()
-                        Button("Play"){
-                            sModel = sModel.init(songName: art.songSelection, coverImage: art.coverArt)
-                            self.label = isPlaying != false ? "Stop" : "Play"
+                        
+                        Button(label) {
+                            isPlaying.toggle()
+                            label = isPlaying ? "Stop" : "Play"
                         }
                     }
                 }
             }
+            
             VStack {
                 Spacer()
-                HStack{
+                HStack {
                     sModel.coverImage
-                    Text("\(sModel.songName)")
-                    Button(self.label, isPlaying != false ? "Stop" : "Play"){
-                        print("Hi!")
-                    }.frame(width: 40, height: 30)
-                        .foregroundColor(.green)
-                        .background(.green)
-                        .cornerRadius(40)
+                        .resizable()
+                        .frame(width: 50, height: 50)
+                    
+                    Text(sModel.songName)
+                    
+                    Button(label) {
+                        isPlaying.toggle()
+                        label = isPlaying ? "Stop" : "Play"
+                    }
+                    .frame(width: 100, height: 40)
+                    .foregroundColor(.white)
+                    .background(isPlaying ? Color.red : Color.green)
+                    .cornerRadius(20)
                 }
             }
         }
         .padding()
+        .onAppear {
+            model.fetchData()
+        }
     }
 }
 
+struct StateModel {
+    var songName: String
+    var coverImage: Image
+}
+
 #Preview {
-    ContentView()
+    ContentView().environmentObject(Model())
 }
